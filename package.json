@@ -5,7 +5,7 @@
     "url": "http://tomasz.janczuk.org",
     "twitter": "tjanczuk"
   },
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "httplock: HTTP based distributed lock",
   "tags": [
     "lock",
