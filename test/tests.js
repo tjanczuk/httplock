@@ -50,13 +50,170 @@ describe('server', function () {
 
 });
 
-describe('lowr', function () {
+describe('status', function () {
 
     var server;
     beforeEach(function (done) {
         server = httplock.create_server({
             port: 31419,
             logger: no_log
+        }, done);
+    });
+
+    afterEach(function (done) {
+        server.close(function () { done(); });
+    });
+
+    it('works on freshly started server', function (done) {
+        httplock.get_status({
+            url: 'http://localhost:31419'
+        }, function (err, stats) {
+            assert.ifError(err);
+            assert.ok(stats);
+            assert.equal(typeof stats, 'object');
+            assert.ok(stats.lowr);
+            assert.equal(typeof stats.lowr, 'object');
+            assert.equal(Object.keys(stats.lowr).length, 0);
+            assert.ok(!isNaN(stats.uptime));
+            assert.ok(stats.memory);
+            assert.equal(typeof stats.memory, 'object');
+            assert.ok(!isNaN(stats.memory.rss));
+            assert.ok(!isNaN(stats.memory.heapTotal));
+            assert.ok(!isNaN(stats.memory.heapUsed));
+            assert.ok(stats.lowr_stats);
+            assert.equal(typeof stats.lowr_stats, 'object');
+            assert.equal(stats.lowr_stats.grant, 0);
+            assert.equal(stats.lowr_stats.wait, 0);
+            assert.equal(stats.lowr_stats.release, 0);
+            assert.equal(stats.lowr_stats.renew, 0);
+            assert.equal(stats.lowr_stats.expire, 0);
+            done();
+        });
+    });
+
+    it('works with one lock taken and released', function (done) {
+        async.series([
+            function (cb) {
+                httplock.take_lowr({
+                    url: 'http://localhost:31419',
+                    name: 'my_lock',
+                    logger: no_log
+                }, function (err, ctx) {
+                    assert.ifError(err);
+                    assert.ok(ctx);
+                    assert.equal(typeof ctx.release, 'function');
+                    ctx.release(null, cb);
+                });
+            },
+            function (cb) {
+                httplock.get_status({
+                    url: 'http://localhost:31419'
+                }, function (err, stats) {
+                    assert.ifError(err);
+                    assert.ok(stats);
+                    assert.equal(typeof stats, 'object');
+                    assert.ok(stats.lowr);
+                    assert.equal(typeof stats.lowr, 'object');
+                    assert.equal(Object.keys(stats.lowr).length, 0);
+                    assert.ok(!isNaN(stats.uptime));
+                    assert.ok(stats.memory);
+                    assert.equal(typeof stats.memory, 'object');
+                    assert.ok(!isNaN(stats.memory.rss));
+                    assert.ok(!isNaN(stats.memory.heapTotal));
+                    assert.ok(!isNaN(stats.memory.heapUsed));
+                    assert.ok(stats.lowr_stats);
+                    assert.equal(typeof stats.lowr_stats, 'object');
+                    assert.equal(stats.lowr_stats.grant, 1);
+                    assert.equal(stats.lowr_stats.wait, 0);
+                    assert.equal(stats.lowr_stats.release, 1);
+                    assert.equal(stats.lowr_stats.renew, 0);
+                    assert.equal(stats.lowr_stats.expire, 0);
+                    cb();
+                });
+            }
+        ], done);
+    });
+
+    it('works with one lock taken and 1 waiting', function (done) {
+        var ctx;
+        async.series([
+            function (cb) {
+                httplock.take_lowr({
+                    url: 'http://localhost:31419',
+                    name: 'my_lock',
+                    logger: no_log
+                }, function (err, c) {
+                    ctx = c;
+                    assert.ifError(err);
+                    cb();
+                });
+            },
+            function (cb) {
+                httplock.take_lowr({
+                    url: 'http://localhost:31419',
+                    name: 'my_lock',
+                    logger: no_log
+                }, function (err, ctx) {
+                    assert.ifError(err);
+                });
+                setTimeout(cb, 100);
+            },
+            function (cb) {
+                httplock.get_status({
+                    url: 'http://localhost:31419'
+                }, function (err, stats) {
+                    assert.ifError(err);
+                    assert.ok(stats);
+                    assert.equal(typeof stats, 'object');
+                    assert.ok(stats.lowr);
+                    assert.equal(typeof stats.lowr, 'object');
+                    assert.equal(Object.keys(stats.lowr).length, 1);
+                    assert.ok(stats.lowr.my_lock);
+                    assert.equal(typeof stats.lowr.my_lock, 'object');
+                    assert.ok(!isNaN(stats.lowr.my_lock.created));
+                    assert.ok(!isNaN(stats.lowr.my_lock.age));
+                    assert.equal(stats.lowr.my_lock.wait_queue, 1);
+                    assert.equal(stats.lowr.my_lock.renew_count, 0);
+                    assert.equal(typeof stats.lowr.my_lock.owner, 'string');
+                    assert.ok(!isNaN(stats.uptime));
+                    assert.ok(stats.memory);
+                    assert.equal(typeof stats.memory, 'object');
+                    assert.ok(!isNaN(stats.memory.rss));
+                    assert.ok(!isNaN(stats.memory.heapTotal));
+                    assert.ok(!isNaN(stats.memory.heapUsed));
+                    assert.ok(stats.lowr_stats);
+                    assert.equal(typeof stats.lowr_stats, 'object');
+                    assert.equal(stats.lowr_stats.grant, 1);
+                    assert.equal(stats.lowr_stats.wait, 1);
+                    assert.equal(stats.lowr_stats.release, 0);
+                    assert.equal(stats.lowr_stats.renew, 0);
+                    assert.equal(stats.lowr_stats.expire, 0);
+                    cb();
+                });
+            }
+        ], function (error) {
+            if (ctx && ctx.release) {
+                ctx.release(null, function () {
+                    done(error);
+                });
+            }
+            else
+                done(error);
+        });
+    });
+
+
+});
+
+
+describe('lowr', function () {
+
+    var server;
+    beforeEach(function (done) {
+        server = httplock.create_server({
+            port: 31419,
+            logger: no_log,
+            ttl: 1000
         }, done);
     });
 
@@ -77,6 +234,21 @@ describe('lowr', function () {
         });
     });
 
+    it('successfuly takes a lock with 1 client and releases after renewal', function (done) {
+        httplock.take_lowr({
+            url: 'http://localhost:31419',
+            name: 'my_lock',
+            logger: no_log
+        }, function (err, ctx) {
+            assert.ifError(err);
+            assert.ok(ctx);
+            assert.equal(typeof ctx.release, 'function');
+            setTimeout(function () {
+                ctx.release(null, done);
+            }, 1500);
+        });
+    });
+
     it('successfuly waits on a lock taken and released by another client', function (done) {
         async.series([
             function (cb) {
@@ -93,6 +265,42 @@ describe('lowr', function () {
                             assert.ifError(err);
                         });
                     }, 500)
+                    cb();
+                });
+            },
+            function (cb) {
+                httplock.take_lowr({
+                    url: 'http://localhost:31419',
+                    name: 'my_lock',
+                    logger: no_log
+                }, function (err, ctx) {
+                    assert.ifError(err);
+                    assert.ok(ctx);
+                    assert.ok(ctx.data);
+                    assert.equal(typeof ctx.data, 'object');
+                    assert.equal(ctx.data.some, 'data');
+                    cb();
+                });                
+            }
+        ], done);
+    });
+
+    it('successfuly waits on a lock taken, renewed, and released by another client', function (done) {
+        async.series([
+            function (cb) {
+                httplock.take_lowr({
+                    url: 'http://localhost:31419',
+                    name: 'my_lock',
+                    logger: no_log
+                }, function (err, ctx) {
+                    assert.ifError(err);
+                    assert.ok(ctx);
+                    assert.equal(typeof ctx.release, 'function');
+                    setTimeout(function () {
+                        ctx.release({ some: 'data' }, function (err) {
+                            assert.ifError(err);
+                        });
+                    }, 1500)
                     cb();
                 });
             },
